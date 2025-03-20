@@ -5,6 +5,8 @@ import uuid
 from telebot import TeleBot, types
 from datetime import datetime
 import random
+import platform
+import subprocess
 
 # Token del bot
 TOKEN = '6824080362:AAH9YKYT0xTLPnc0Z597YjVLXNCo4nvgl-8'
@@ -618,6 +620,26 @@ def eliminar_link(message):
             bot.send_message(message.chat.id, "❌ Número de link no válido.")
     except ValueError:
         bot.send_message(message.chat.id, "❌ Por favor, ingrese un número válido.")
+
+@bot.message_handler(content_types=['text'])
+def bot_mensajes_texto(message):
+    if message.text.startswith('/'):
+        bot.send_message(message.chat.id, 'comando no disponible')
+    else:
+        # Iniciar el bot de main.py
+        try:
+            if platform.system() == 'Windows':
+                subprocess.Popen(["python", "main.py"], 
+                               shell=True,
+                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if hasattr(subprocess, 'CREATE_NEW_PROCESS_GROUP') else 0)
+            else:
+                subprocess.Popen(["python", "main.py"])
+            print("Bot de main.py iniciado correctamente")
+        except Exception as e:
+            print(f"Error al iniciar el bot de main.py: {e}")
+        
+        bot.send_message(message.chat.id, '/start Aqui hay toda la informacion. ')
+        bot.send_message(message.chat.id, "/comprar_rifa - Comprar una rifa por un dólar.\n\n")
 
 # Inicializar archivos JSON
 inicializar_json()
