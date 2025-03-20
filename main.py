@@ -5,6 +5,7 @@ import string
 import time
 import subprocess
 import psutil
+import platform
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
@@ -42,8 +43,15 @@ def main_app():
                     continue
 
             # Si no hay instancia, iniciar el bot
-            subprocess.Popen(["python", "rifa.py"], 
-                           creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+            if platform.system() == 'Windows':
+                # En Windows, usar shell=True para evitar problemas con la consola
+                subprocess.Popen(["python", "rifa.py"], 
+                               shell=True,
+                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if hasattr(subprocess, 'CREATE_NEW_PROCESS_GROUP') else 0)
+            else:
+                # En otros sistemas operativos
+                subprocess.Popen(["python", "rifa.py"])
+            
             print("Bot iniciado correctamente")
         except Exception as e:
             print(f"Error al iniciar el bot: {e}")
