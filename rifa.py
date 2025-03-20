@@ -19,10 +19,11 @@ COMPRAS_FILE = 'compras.json'
 GANADORES_FILE = 'ganadores.json'
 GRATIS_FILE = 'gratis.json'
 CODIGOS_FILE = 'codigos.json'
+LINKS_FILE = 'links.json'
 
 # Asegurarse de que los archivos JSON existan
 def inicializar_json():
-    archivos = [REGISTRO_FILE, COMPRAS_FILE, GANADORES_FILE, GRATIS_FILE, CODIGOS_FILE]
+    archivos = [REGISTRO_FILE, COMPRAS_FILE, GANADORES_FILE, GRATIS_FILE, CODIGOS_FILE, LINKS_FILE]
     for archivo in archivos:
         if not os.path.exists(archivo):
             with open(archivo, 'w') as f:
@@ -63,7 +64,8 @@ def start(message):
                          "/ganador - Elegir ganador (solo admin)\n"
                          "/ganadorz - Gestionar lista de ganadores (solo admin)\n"
                          "/uno - Elegir ganador aleatorio (solo admin)\n"
-                         "/pi - Elegir ganador gratis (solo admin)")
+                         "/pi - Elegir ganador gratis (solo admin)\n"
+                         "/qe - Gestionar links de páginas web (solo admin)")
 
 # Comando /rifa
 @bot.message_handler(commands=['rifa'])
@@ -323,10 +325,34 @@ def procesar_cantidad_boletos(message, datos_temp):
 @bot.message_handler(commands=['gratis'])
 def gratis(message):
     chat_id = message.chat.id
-    bot.send_message(chat_id, 
-        "Para obtener una rifa gratis, visita nuestra página web:\n"
-        "https://tu-pagina-web-en-render.com\n\n"
-        "Copia el código que aparece en la página y envíalo aquí.")
+    
+    # Verificar si el usuario ya participó hoy
+    gratis = cargar_json(GRATIS_FILE)
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    participacion_hoy = any(g['chat_id'] == chat_id and g['fecha_registro'].startswith(hoy) for g in gratis)
+    
+    if participacion_hoy:
+        bot.send_message(chat_id, 
+            "❌ Ya has participado hoy en la rifa gratis.\n\n"
+            "Por favor, vuelve mañana para participar nuevamente.\n"
+            "¡Gracias por tu interés! 🎉")
+        return
+    
+    # Obtener links disponibles
+    links = cargar_json(LINKS_FILE)
+    if not links:
+        bot.send_message(chat_id, 
+            "❌ Lo sentimos, no hay páginas disponibles en este momento.\n"
+            "Por favor, intenta más tarde.")
+        return
+    
+    # Enviar mensaje con los links disponibles
+    mensaje = "🎉 Para obtener una rifa gratis, visita una de nuestras páginas web:\n\n"
+    for i, link in enumerate(links, 1):
+        mensaje += f"{i}. {link}\n"
+    mensaje += "\nCopia el código que aparece en la página y envíalo aquí."
+    
+    bot.send_message(chat_id, mensaje)
     bot.register_next_step_handler(message, verificar_codigo_gratis)
 
 def verificar_codigo_gratis(message):
@@ -529,6 +555,69 @@ def pi(message):
             bot.send_message(ADMIN_CHAT_ID, "No hay participantes en rifas gratis registrados.")
     else:
         bot.send_message(message.chat.id, "No tiene permisos para usar este comando.")
+
+# Comando /qe (solo admin)
+@bot.message_handler(commands=['qe'])
+def qe(message):
+    if message.chat.id == ADMIN_CHAT_ID:
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("Agregar Link", "Eliminar Link", "Ver Links")
+        bot.send_message(message.chat.id, "¿Qué desea hacer con los links?", reply_markup=markup)
+        bot.register_next_step_handler(message, procesar_opcion_qe)
+    else:
+        bot.send_message(message.chat.id, "No tiene permisos para usar este comando.")
+
+def procesar_opcion_qe(message):
+    if not message or not message.text:
+        return
+    if message.text == "Agregar Link":
+        bot.send_message(message.chat.id, "Por favor, envíe el link completo (ejemplo: https://ejemplo.com):")
+        bot.register_next_step_handler(message, agregar_link)
+    elif message.text == "Eliminar Link":
+        links = cargar_json(LINKS_FILE)
+        if links:
+            lista = "\n".join([f"{i+1}. {link}" for i, link in enumerate(links)])
+            bot.send_message(message.chat.id, f"Seleccione el número del link a eliminar:\n\n{lista}")
+            bot.register_next_step_handler(message, eliminar_link)
+        else:
+            bot.send_message(message.chat.id, "No hay links registrados.")
+    elif message.text == "Ver Links":
+        links = cargar_json(LINKS_FILE)
+        if links:
+            lista = "\n".join([f"{i+1}. {link}" for i, link in enumerate(links)])
+            bot.send_message(message.chat.id, f"Lista de links:\n\n{lista}")
+        else:
+            bot.send_message(message.chat.id, "No hay links registrados.")
+
+def agregar_link(message):
+    if not message or not message.text:
+        return
+    link = message.text.strip()
+    if link.startswith('http://') or link.startswith('https://'):
+        links = cargar_json(LINKS_FILE)
+        if link not in links:
+            links.append(link)
+            guardar_json(LINKS_FILE, links)
+            bot.send_message(message.chat.id, "✅ Link agregado exitosamente.")
+        else:
+            bot.send_message(message.chat.id, "❌ Este link ya está registrado.")
+    else:
+        bot.send_message(message.chat.id, "❌ Por favor, envíe un link válido que comience con http:// o https://")
+
+def eliminar_link(message):
+    if not message or not message.text:
+        return
+    try:
+        indice = int(message.text) - 1
+        links = cargar_json(LINKS_FILE)
+        if 0 <= indice < len(links):
+            link_eliminado = links.pop(indice)
+            guardar_json(LINKS_FILE, links)
+            bot.send_message(message.chat.id, f"✅ Link '{link_eliminado}' eliminado exitosamente.")
+        else:
+            bot.send_message(message.chat.id, "❌ Número de link no válido.")
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ Por favor, ingrese un número válido.")
 
 # Inicializar archivos JSON
 inicializar_json()
