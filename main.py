@@ -4,6 +4,7 @@ import random
 import string
 import time
 import subprocess
+import psutil
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
@@ -31,7 +32,18 @@ def main_app():
     # Iniciar el bot de Telegram
     def iniciar_bot():
         try:
-            subprocess.Popen(["python", "rifa.py"])
+            # Verificar si ya hay una instancia del bot ejecutándose
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if 'python' in proc.info['name'].lower() and 'rifa.py' in ' '.join(proc.info['cmdline']):
+                        print("El bot ya está ejecutándose")
+                        return
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            # Si no hay instancia, iniciar el bot
+            subprocess.Popen(["python", "rifa.py"], 
+                           creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
             print("Bot iniciado correctamente")
         except Exception as e:
             print(f"Error al iniciar el bot: {e}")
