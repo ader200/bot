@@ -6,11 +6,26 @@ import time
 import subprocess
 from datetime import datetime, timedelta
 import os
+from dotenv import load_dotenv
+from pymongo import MongoClient
+from bson import ObjectId
+
+# Cargar variables de entorno
+load_dotenv()
 
 app = Flask(__name__)
 
-# Archivo para almacenar los códigos y su estado
-CODIGOS_FILE = 'codigos.json'
+# Conexión a MongoDB
+client = MongoClient(os.getenv('MONGODB_URI'))
+db = client.rifa_db
+
+# Colecciones
+codigos_collection = db.codigos
+registro_collection = db.registro
+compras_collection = db.compras
+ganadores_collection = db.ganadores
+gratis_collection = db.gratis
+links_collection = db.links
 
 # Iniciar el bot de Telegram
 def iniciar_bot():
@@ -24,49 +39,34 @@ def iniciar_bot():
 def generar_codigo():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-# Cargar códigos existentes
-def cargar_codigos():
-    try:
-        with open(CODIGOS_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return {}
-
-# Guardar códigos
-def guardar_codigos(codigos):
-    with open(CODIGOS_FILE, 'w') as f:
-        json.dump(codigos, f)
-
 # Generar nuevo código y guardarlo
 def actualizar_codigo():
-    codigos = cargar_codigos()
     nuevo_codigo = generar_codigo()
-    codigos[nuevo_codigo] = {
+    codigo_data = {
+        'codigo': nuevo_codigo,
         'activo': True,
-        'fecha_creacion': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'fecha_expiracion': (datetime.now() + timedelta(minutes=1)).strftime('%Y-%m-%d %H:%M:%S'),
-        'tiempo_espera': (datetime.now() + timedelta(minutes=1)).strftime('%Y-%m-%d %H:%M:%S')
+        'fecha_creacion': datetime.now(),
+        'fecha_expiracion': datetime.now() + timedelta(minutes=1),
+        'tiempo_espera': datetime.now() + timedelta(minutes=1)
     }
-    guardar_codigos(codigos)
+    codigos_collection.insert_one(codigo_data)
     return nuevo_codigo
 
 # Verificar si un código es válido
 def verificar_codigo(codigo):
-    codigos = cargar_codigos()
-    if codigo in codigos:
-        codigo_info = codigos[codigo]
-        if codigo_info['activo']:
-            fecha_expiracion = datetime.strptime(codigo_info['fecha_expiracion'], '%Y-%m-%d %H:%M:%S')
-            tiempo_espera = datetime.strptime(codigo_info['tiempo_espera'], '%Y-%m-%d %H:%M:%S')
-            ahora = datetime.now()
-            
-            if ahora > fecha_expiracion:
-                return {'valido': False, 'mensaje': 'Código expirado'}
-            elif ahora < tiempo_espera:
-                tiempo_restante = int((tiempo_espera - ahora).total_seconds())
-                return {'valido': False, 'mensaje': f'Espera {tiempo_restante} segundos antes de usar el código'}
-            else:
-                return {'valido': True, 'mensaje': 'Código válido'}
+    codigo_info = codigos_collection.find_one({'codigo': codigo})
+    if codigo_info:
+        ahora = datetime.now()
+        fecha_expiracion = codigo_info['fecha_expiracion']
+        tiempo_espera = codigo_info['tiempo_espera']
+        
+        if ahora > fecha_expiracion:
+            return {'valido': False, 'mensaje': 'Código expirado'}
+        elif ahora < tiempo_espera:
+            tiempo_restante = int((tiempo_espera - ahora).total_seconds())
+            return {'valido': False, 'mensaje': f'Espera {tiempo_restante} segundos antes de usar el código'}
+        else:
+            return {'valido': True, 'mensaje': 'Código válido'}
     return {'valido': False, 'mensaje': 'Código no válido'}
 
 # Rutas para las páginas web
@@ -97,6 +97,13 @@ def verificar():
 @app.route('/nuevo_codigo')
 def nuevo_codigo():
     return jsonify({'codigo': actualizar_codigo()})
+
+# Ruta para limpiar códigos antiguos (cada hora)
+@app.route('/limpiar_codigos')
+def limpiar_codigos():
+    fecha_limite = datetime.now() - timedelta(hours=1)
+    codigos_collection.delete_many({'fecha_creacion': {'$lt': fecha_limite}})
+    return jsonify({'mensaje': 'Códigos antiguos eliminados'})
 
 # Iniciar el bot al arrancar la aplicación
 if __name__ == '__main__':
