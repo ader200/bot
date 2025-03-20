@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galería de Imágenes</title>
+    <style>
+        .center {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .button {
+            margin: 0 10px;
+        }
+        .gallery-section {
+            margin-top: 40px;
+        }
+        .trabajador {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Galería de Imágenes</h1>
+    <div>
+        {% for imagen in imagenes %}
+            <div style="margin-bottom: 20px;">
+                <img src="{{ url_for('imagenes', filename=imagen) }}" alt="{{ imagen }}" style="width:200px;">
+                <div>
+                    <form action="{{ url_for('guardar', filename=imagen) }}" method="post">
+                        <input type="number" name="num_copias" placeholder="Número de copias" min="0">
+                        <button type="submit" class="button">Guardar</button>
+                    </form>
+                    <a href="{{ url_for('borrar', filename=imagen) }}" class="button">Borrar</a>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+    <div class="center">
+        <a href="{{ url_for('finalizar') }}" class="button">Finalizar</a>
+    </div>
+
+    <div class="gallery-section">
+        <h1>Imágenes de Inversiones</h1>
+        <div>
+            {% for inversion in inversiones %}
+                <div style="margin-bottom: 20px;">
+                    <img src="{{ url_for('inversiones', filename=inversion) }}" alt="{{ inversion }}" style="width:200px;">
+                    <div>
+                        <a href="{{ url_for('guardar_inversion', filename=inversion) }}" class="button">Guardar</a>
+                        <a href="{{ url_for('borrar_inversion', filename=inversion) }}" class="button">Borrar</a>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+        <div class="center">
+            <a href="{{ url_for('finalizar_inversion') }}" class="button">Finalizar Inversión</a>
+        </div>
+    </div>
+
+    <div class="gallery-section">
+        <h1>Trabajadores</h1>
+        <div>
+            {% for trabajador in trabajadores %}
+                <div class="trabajador">
+                    <p>Nombre: {{ trabajador.nombre }}</p>
+                    <p>Cuenta de Banco: {{ trabajador.cuenta_de_banco }}</p>
+                    <p>Chat ID: {{ trabajador.chat_id }}</p>
+                    <div>
+                        <a href="{{ url_for('guardar_trabajador', index=loop.index0) }}" class="button">Guardar</a>
+                        <a href="{{ url_for('borrar_trabajador', index=loop.index0) }}" class="button">Borrar</a>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+   
+    <div class="center">
+        <form action="{{ url_for('siguiente') }}" method="post">
+            <button type="submit" class="button">Siguiente</button>
+        </form>
+    </div>
+</body>
+</html>
