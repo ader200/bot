@@ -1,96 +1,124 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify
 import json
-import random
-import string
-import time
-import subprocess
-import psutil
-import platform
 from datetime import datetime, timedelta
+import random
 import os
-from dotenv import load_dotenv
+import threading
+import time
 from pymongo import MongoClient
-from bson import ObjectId
+from dotenv import load_dotenv
 
 # Cargar variables de entorno
 load_dotenv()
 
 def main_app():
-    app = Flask(__name__)
-
     # Conexión a MongoDB
     client = MongoClient(os.getenv('MONGODB_URI'))
     db = client.rifa_db
 
-    # Colecciones
-    codigos_collection = db.codigos
-    registro_collection = db.registro
-    compras_collection = db.compras
-    ganadores_collection = db.ganadores
-    gratis_collection = db.gratis
-    links_collection = db.links
+    app = Flask(__name__)
 
-    # Iniciar el bot de Telegram
-    def iniciar_bot():
-        try:
-            # Verificar si ya hay una instancia del bot ejecutándose
-            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                try:
-                    if 'python' in proc.info['name'].lower() and 'rifa.py' in ' '.join(proc.info['cmdline']):
-                        print("El bot ya está ejecutándose")
-                        return
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
+    ARCHIVO_CODIGOS = 'codigos.json'
+    ARCHIVO_MOSTRADOS = 'codigos_mostrados.json'
 
-            # Si no hay instancia, iniciar el bot
-            if platform.system() == 'Windows':
-                # En Windows, usar shell=True para evitar problemas con la consola
-                subprocess.Popen(["python", "rifa.py"], 
-                               shell=True,
-                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if hasattr(subprocess, 'CREATE_NEW_PROCESS_GROUP') else 0)
-            else:
-                # En otros sistemas operativos
-                subprocess.Popen(["python", "rifa.py"])
+    def inicializar_archivos():
+        """Inicializa los archivos JSON si no existen"""
+        if not os.path.exists(ARCHIVO_MOSTRADOS):
+            with open(ARCHIVO_MOSTRADOS, 'w') as f:
+                json.dump({
+                    "codigos_mostrados": [],
+                    "ultimo_codigo": None,
+                    "ultima_actualizacion": None
+                }, f, indent=4)
+
+    def cargar_codigos():
+        """Carga los códigos del archivo JSON"""
+        if not os.path.exists(ARCHIVO_CODIGOS):
+            return None
+        with open(ARCHIVO_CODIGOS, 'r') as f:
+            return json.load(f)
+
+    def cargar_mostrados():
+        """Carga el registro de códigos mostrados"""
+        with open(ARCHIVO_MOSTRADOS, 'r') as f:
+            return json.load(f)
+
+    def guardar_mostrados(datos):
+        """Guarda el registro de códigos mostrados"""
+        with open(ARCHIVO_MOSTRADOS, 'w') as f:
+            json.dump(datos, f, indent=4)
+
+    def obtener_nuevo_codigo():
+        """Obtiene un nuevo código aleatorio que no haya sido mostrado"""
+        datos = cargar_codigos()
+        mostrados = cargar_mostrados()
+        
+        if not datos:
+            return None
+
+        # Obtener códigos disponibles (los que no están en mostrados)
+        codigos_disponibles = [c for c in datos['codigos'] if c not in mostrados['codigos_mostrados']]
+        
+        # Si no hay códigos disponibles, reiniciar la lista
+        if not codigos_disponibles:
+            mostrados['codigos_mostrados'] = []
+            codigos_disponibles = datos['codigos']
+        
+        # Seleccionar un código aleatorio
+        if codigos_disponibles:
+            nuevo_codigo = random.choice(codigos_disponibles)
+            mostrados['codigos_mostrados'].append(nuevo_codigo)
+            mostrados['ultimo_codigo'] = nuevo_codigo
+            mostrados['ultima_actualizacion'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            guardar_mostrados(mostrados)
+            return nuevo_codigo
             
-            print("Bot iniciado correctamente")
-        except Exception as e:
-            print(f"Error al iniciar el bot: {e}")
+        return None
 
-    # Generar código aleatorio
-    def generar_codigo():
-        return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    def actualizar_codigo_periodicamente():
+        """Función que se ejecuta en un hilo separado para actualizar el código cada minuto"""
+        while True:
+            obtener_nuevo_codigo()
+            time.sleep(60)  # Esperar 1 minuto
 
-    # Generar nuevo código y guardarlo
-    def actualizar_codigo():
-        nuevo_codigo = generar_codigo()
-        codigo_data = {
-            'codigo': nuevo_codigo,
-            'activo': True,
-            'fecha_creacion': datetime.now(),
-            'fecha_expiracion': datetime.now() + timedelta(minutes=1),
-            'tiempo_espera': datetime.now() + timedelta(minutes=1)
-        }
-        codigos_collection.insert_one(codigo_data)
-        return nuevo_codigo
-
-    # Verificar si un código es válido
     def verificar_codigo(codigo):
-        codigo_info = codigos_collection.find_one({'codigo': codigo})
-        if codigo_info:
-            ahora = datetime.now()
-            fecha_expiracion = codigo_info['fecha_expiracion']
-            tiempo_espera = codigo_info['tiempo_espera']
-            
-            if ahora > fecha_expiracion:
-                return {'valido': False, 'mensaje': 'Código expirado'}
-            elif ahora < tiempo_espera:
-                tiempo_restante = int((tiempo_espera - ahora).total_seconds())
-                return {'valido': False, 'mensaje': f'Espera {tiempo_restante} segundos antes de usar el código'}
-            else:
-                return {'valido': True, 'mensaje': 'Código válido'}
-        return {'valido': False, 'mensaje': 'Código no válido'}
+        """Verifica si un código es válido"""
+        mostrados = cargar_mostrados()
+        if not mostrados or not mostrados['ultimo_codigo']:
+            return {'valido': False, 'mensaje': 'No hay código activo'}
+        
+        if codigo == mostrados['ultimo_codigo']:
+            # Verificar si ya fue usado
+            datos = cargar_codigos()
+            if any(usado['codigo'] == codigo for usado in datos['usados']):
+                return {'valido': False, 'mensaje': 'Este código ya ha sido utilizado'}
+            return {'valido': True, 'mensaje': 'Código válido'}
+        
+        return {'valido': False, 'mensaje': 'Código no válido o inactivo'}
 
-    # Rutas para las páginas web
+    def marcar_codigo_usado(codigo):
+        """Marca un código como usado"""
+        datos = cargar_codigos()
+        mostrados = cargar_mostrados()
+        
+        if not datos or codigo != mostrados['ultimo_codigo']:
+            return False
+        
+        # Verificar si ya está usado
+        if any(usado['codigo'] == codigo for usado in datos['usados']):
+            return False
+        
+        # Agregar a usados
+        datos['usados'].append({
+            'codigo': codigo,
+            'fecha': datetime.now().strftime('%Y-%m-%d')
+        })
+        
+        with open(ARCHIVO_CODIGOS, 'w') as f:
+            json.dump(datos, f, indent=4)
+        
+        return True
+
     @app.route('/')
     def index():
         return render_template('index.html', numero_pagina=1)
@@ -107,33 +135,32 @@ def main_app():
     def pagina4():
         return render_template('index.html', numero_pagina=4)
 
-    # Ruta para verificar código
     @app.route('/verificar', methods=['POST'])
     def verificar():
         codigo = request.form.get('codigo')
+        if not codigo:
+            return jsonify({'valido': False, 'mensaje': 'Código no proporcionado'})
+        
         resultado = verificar_codigo(codigo)
+        if resultado['valido']:
+            marcar_codigo_usado(codigo)
+        
         return jsonify(resultado)
 
-    # Ruta para obtener nuevo código
-    @app.route('/nuevo_codigo')
-    def nuevo_codigo():
-        return jsonify({'codigo': actualizar_codigo()})
+    @app.route('/codigo_activo')
+    def obtener_codigo_activo():
+        mostrados = cargar_mostrados()
+        return jsonify({'codigo': mostrados['ultimo_codigo'] if mostrados else None})
 
-    # Ruta para limpiar códigos antiguos (cada hora)
-    @app.route('/limpiar_codigos')
-    def limpiar_codigos():
-        fecha_limite = datetime.now() - timedelta(hours=1)
-        codigos_collection.delete_many({'fecha_creacion': {'$lt': fecha_limite}})
-        return jsonify({'mensaje': 'Códigos antiguos eliminados'})
+    # Inicializar archivos
+    inicializar_archivos()
 
-    # Iniciar el bot al arrancar la aplicación
-    iniciar_bot()
+    # Iniciar el hilo que actualiza el código periódicamente
+    actualizador = threading.Thread(target=actualizar_codigo_periodicamente, daemon=True)
+    actualizador.start()
     
-    return app
+    # Iniciar la aplicación Flask
+    app.run(debug=True, host='0.0.0.0', port=8000)
 
-# Crear la aplicación
-app = main_app()
-
-# Iniciar la aplicación
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8000)
+    main_app()
