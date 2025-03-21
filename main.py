@@ -12,24 +12,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def main_app():
-    # Conexión a MongoDB
+    app = Flask(__name__)
+      
+      # Conexión a MongoDB
     client = MongoClient(os.getenv('MONGODB_URI'))
     db = client.rifa_db
 
-    app = Flask(__name__)
+  
 
     ARCHIVO_CODIGOS = 'codigos.json'
-    ARCHIVO_MOSTRADOS = 'codigos_mostrados.json'
-
-    def inicializar_archivos():
-        """Inicializa los archivos JSON si no existen"""
-        if not os.path.exists(ARCHIVO_MOSTRADOS):
-            with open(ARCHIVO_MOSTRADOS, 'w') as f:
-                json.dump({
-                    "codigos_mostrados": [],
-                    "ultimo_codigo": None,
-                    "ultima_actualizacion": None
-                }, f, indent=4)
 
     def cargar_codigos():
         """Carga los códigos del archivo JSON"""
@@ -38,58 +29,60 @@ def main_app():
         with open(ARCHIVO_CODIGOS, 'r') as f:
             return json.load(f)
 
-    def cargar_mostrados():
-        """Carga el registro de códigos mostrados"""
-        with open(ARCHIVO_MOSTRADOS, 'r') as f:
-            return json.load(f)
-
-    def guardar_mostrados(datos):
-        """Guarda el registro de códigos mostrados"""
-        with open(ARCHIVO_MOSTRADOS, 'w') as f:
+    def guardar_codigos(datos):
+        """Guarda los códigos en el archivo JSON"""
+        with open(ARCHIVO_CODIGOS, 'w') as f:
             json.dump(datos, f, indent=4)
 
-    def obtener_nuevo_codigo():
-        """Obtiene un nuevo código aleatorio que no haya sido mostrado"""
+    def actualizar_codigo_activo():
+        """Actualiza el código activo si es necesario"""
         datos = cargar_codigos()
-        mostrados = cargar_mostrados()
-        
         if not datos:
             return None
 
-        # Obtener códigos disponibles (los que no están en mostrados)
-        codigos_disponibles = [c for c in datos['codigos'] if c not in mostrados['codigos_mostrados']]
+        ahora = datetime.now()
+        hoy = ahora.strftime('%Y-%m-%d')
         
-        # Si no hay códigos disponibles, reiniciar la lista
-        if not codigos_disponibles:
-            mostrados['codigos_mostrados'] = []
-            codigos_disponibles = datos['codigos']
+        # Si ya hay un código activo para hoy y no está usado, retornarlo
+        if datos['fecha_activo'] == hoy and datos['codigo_activo']:
+            # Verificar si el código no está en usados
+            if not any(usado['codigo'] == datos['codigo_activo'] for usado in datos['usados']):
+                return datos['codigo_activo']
         
-        # Seleccionar un código aleatorio
-        if codigos_disponibles:
-            nuevo_codigo = random.choice(codigos_disponibles)
-            mostrados['codigos_mostrados'].append(nuevo_codigo)
-            mostrados['ultimo_codigo'] = nuevo_codigo
-            mostrados['ultima_actualizacion'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            guardar_mostrados(mostrados)
-            return nuevo_codigo
+        # Liberar códigos usados después de 30 días
+        if datos['usados']:
+            fecha_limite = (ahora - timedelta(days=30)).strftime('%Y-%m-%d')
+            nuevos_usados = []
             
-        return None
+            for codigo in datos['usados']:
+                if codigo['fecha'] < fecha_limite:
+                    datos['codigos'].append(codigo['codigo'])
+                else:
+                    nuevos_usados.append(codigo)
+            
+            datos['usados'] = nuevos_usados
 
-    def actualizar_codigo_periodicamente():
-        """Función que se ejecuta en un hilo separado para actualizar el código cada minuto"""
-        while True:
-            obtener_nuevo_codigo()
-            time.sleep(60)  # Esperar 1 minuto
+        # Seleccionar nuevo código activo solo si no hay uno activo o si el actual está usado
+        if not datos['codigo_activo'] or any(usado['codigo'] == datos['codigo_activo'] for usado in datos['usados']):
+            if datos['codigos']:
+                nuevo_activo = random.choice(datos['codigos'])
+                datos['codigos'].remove(nuevo_activo)
+                datos['codigo_activo'] = nuevo_activo
+                datos['fecha_activo'] = hoy
+                guardar_codigos(datos)
+                return nuevo_activo
+        
+        return datos['codigo_activo']
 
     def verificar_codigo(codigo):
-        """Verifica si un código es válido"""
-        mostrados = cargar_mostrados()
-        if not mostrados or not mostrados['ultimo_codigo']:
-            return {'valido': False, 'mensaje': 'No hay código activo'}
+        """Verifica si un código es válido y está activo"""
+        datos = cargar_codigos()
+        if not datos:
+            return {'valido': False, 'mensaje': 'Error al cargar códigos'}
         
-        if codigo == mostrados['ultimo_codigo']:
+        # Verificar si el código coincide con el activo
+        if codigo == datos['codigo_activo']:
             # Verificar si ya fue usado
-            datos = cargar_codigos()
             if any(usado['codigo'] == codigo for usado in datos['usados']):
                 return {'valido': False, 'mensaje': 'Este código ya ha sido utilizado'}
             return {'valido': True, 'mensaje': 'Código válido'}
@@ -99,9 +92,7 @@ def main_app():
     def marcar_codigo_usado(codigo):
         """Marca un código como usado"""
         datos = cargar_codigos()
-        mostrados = cargar_mostrados()
-        
-        if not datos or codigo != mostrados['ultimo_codigo']:
+        if not datos or codigo != datos['codigo_activo']:
             return False
         
         # Verificar si ya está usado
@@ -114,10 +105,18 @@ def main_app():
             'fecha': datetime.now().strftime('%Y-%m-%d')
         })
         
-        with open(ARCHIVO_CODIGOS, 'w') as f:
-            json.dump(datos, f, indent=4)
+        # Limpiar código activo
+        datos['codigo_activo'] = None
+        datos['fecha_activo'] = None
         
+        guardar_codigos(datos)
         return True
+
+    def actualizar_codigo_periodicamente():
+        """Función que se ejecuta en un hilo separado para actualizar el código cada minuto"""
+        while True:
+            actualizar_codigo_activo()
+            time.sleep(60)  # Esperar 1 minuto
 
     @app.route('/')
     def index():
@@ -149,11 +148,8 @@ def main_app():
 
     @app.route('/codigo_activo')
     def obtener_codigo_activo():
-        mostrados = cargar_mostrados()
-        return jsonify({'codigo': mostrados['ultimo_codigo'] if mostrados else None})
-
-    # Inicializar archivos
-    inicializar_archivos()
+        codigo = actualizar_codigo_activo()
+        return jsonify({'codigo': codigo})
 
     # Iniciar el hilo que actualiza el código periódicamente
     actualizador = threading.Thread(target=actualizar_codigo_periodicamente, daemon=True)
