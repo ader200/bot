@@ -77,6 +77,9 @@
         .estado.disponible {
             color: #4CAF50;
         }
+        .estado.usado {
+            color: #ff4444;
+        }
         .numero-pagina {
             position: fixed;
             top: 10px;
@@ -97,9 +100,9 @@
                 <div class="card">
                     <div class="card-body text-center">
                         <h1 class="mb-4">🎉 Sistema de Rifas Gratis 🎉</h1>
-                        <div class="codigo" id="codigo">CÓDIGO NO DISPONIBLE</div>
-                        <div class="timer" id="timer">Tiempo restante: 1:00</div>
-                        <div class="estado" id="estado">Esperando 1 minuto para mostrar el código...</div>
+                        <div class="codigo" id="codigo">Verificando disponibilidad...</div>
+                        <div class="timer" id="timer"></div>
+                        <div class="estado" id="estado">Verificando código disponible...</div>
                         <button class="btn btn-copy" onclick="copiarCodigo()" id="btnCopiar" disabled>Copiar Código</button>
                     </div>
                 </div>
@@ -118,6 +121,8 @@
                             <ul class="mb-0">
                                 <li>Debes esperar 1 minuto antes de poder ver y usar el código</li>
                                 <li>Solo puedes participar una vez al día</li>
+                                <li>Los códigos usados no estarán disponibles por 30 días</li>
+                                <li>Cada página tiene su propio código único</li>
                             </ul>
                         </div>
                     </div>
@@ -130,25 +135,60 @@
         let tiempoRestante = 60; // 1 minuto en segundos
         let codigoActual = '';
         let codigoMostrado = false;
+        let ultimaActualizacion = Date.now();
+        let timerInterval = null;
+        const numeroPagina = "{{ numero_pagina }}";
 
-        // Obtener el código inicial
-        fetch('/nuevo_codigo')
-            .then(response => response.json())
-            .then(data => {
-                codigoActual = data.codigo;
-            });
+        function obtenerCodigo() {
+            fetch(`/codigo_activo/${numeroPagina}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.codigo) {
+                        codigoActual = data.codigo;
+                        if (!codigoMostrado) {
+                            // Si es la primera vez que obtenemos un código, iniciamos el contador
+                            if (!timerInterval) {
+                                timerInterval = setInterval(actualizarTimer, 1000);
+                            }
+                            document.getElementById('estado').textContent = 'Esperando 1 minuto para mostrar el código...';
+                            document.getElementById('estado').className = 'estado esperando';
+                            document.getElementById('timer').textContent = 'Tiempo restante: 1:00';
+                        } else if (tiempoRestante <= 0) {
+                            mostrarCodigo();
+                        }
+                    } else {
+                        // Si no hay código disponible
+                        document.getElementById('codigo').textContent = 'NO HAY CÓDIGOS DISPONIBLES';
+                        document.getElementById('estado').textContent = 'No hay códigos disponibles en este momento';
+                        document.getElementById('estado').className = 'estado usado';
+                        document.getElementById('btnCopiar').disabled = true;
+                        document.getElementById('timer').textContent = '';
+                        if (timerInterval) {
+                            clearInterval(timerInterval);
+                            timerInterval = null;
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('codigo').textContent = 'ERROR AL OBTENER CÓDIGO';
+                    document.getElementById('estado').textContent = 'Error al obtener el código';
+                    document.getElementById('estado').className = 'estado usado';
+                    document.getElementById('btnCopiar').disabled = true;
+                    document.getElementById('timer').textContent = '';
+                    if (timerInterval) {
+                        clearInterval(timerInterval);
+                        timerInterval = null;
+                    }
+                });
+        }
 
-        function actualizarEstado() {
+        function mostrarCodigo() {
             const estado = document.getElementById('estado');
             const btnCopiar = document.getElementById('btnCopiar');
             const codigoElement = document.getElementById('codigo');
             
-            if (tiempoRestante > 0) {
-                estado.textContent = `Esperando ${Math.floor(tiempoRestante / 60)}:${(tiempoRestante % 60).toString().padStart(2, '0')} para mostrar el código...`;
-                estado.className = 'estado esperando';
-                btnCopiar.disabled = true;
-                codigoElement.textContent = 'CÓDIGO NO DISPONIBLE';
-            } else if (!codigoMostrado) {
+            if (codigoActual) {
                 estado.textContent = 'Código disponible';
                 estado.className = 'estado disponible';
                 btnCopiar.disabled = false;
@@ -157,21 +197,43 @@
             }
         }
 
-        function actualizarTimer() {
-            const minutos = Math.floor(tiempoRestante / 60);
-            const segundos = tiempoRestante % 60;
-            document.getElementById('timer').textContent = 
-                `Tiempo restante: ${minutos.toString().padStart(2, '0')}:${segundos.toString().padStart(2, '0')}`;
+        function actualizarEstado() {
+            const estado = document.getElementById('estado');
+            const btnCopiar = document.getElementById('btnCopiar');
+            const codigoElement = document.getElementById('codigo');
             
-            if (tiempoRestante > 0) {
-                tiempoRestante--;
+            if (tiempoRestante > 0 && codigoActual) {
+                estado.textContent = `Esperando ${Math.floor(tiempoRestante / 60)}:${(tiempoRestante % 60).toString().padStart(2, '0')} para mostrar el código...`;
+                estado.className = 'estado esperando';
+                btnCopiar.disabled = true;
+                codigoElement.textContent = 'CÓDIGO NO DISPONIBLE';
+            } else if (!codigoMostrado && codigoActual) {
+                mostrarCodigo();
             }
-            
-            actualizarEstado();
+        }
+
+        function actualizarTimer() {
+            if (tiempoRestante > 0) {
+                const minutos = Math.floor(tiempoRestante / 60);
+                const segundos = tiempoRestante % 60;
+                document.getElementById('timer').textContent = 
+                    `Tiempo restante: ${minutos.toString().padStart(2, '0')}:${segundos.toString().padStart(2, '0')}`;
+                tiempoRestante--;
+                actualizarEstado();
+            } else if (!codigoMostrado && codigoActual) {
+                mostrarCodigo();
+                document.getElementById('timer').textContent = 'Código listo para usar';
+            }
+
+            // Actualizar código cada minuto
+            if (Date.now() - ultimaActualizacion >= 60000) {
+                obtenerCodigo();
+                ultimaActualizacion = Date.now();
+            }
         }
 
         function copiarCodigo() {
-            if (codigoMostrado) {
+            if (codigoMostrado && codigoActual) {
                 navigator.clipboard.writeText(codigoActual)
                     .then(() => {
                         const btn = document.getElementById('btnCopiar');
@@ -180,12 +242,16 @@
                         setTimeout(() => {
                             btn.textContent = originalText;
                         }, 2000);
+                    })
+                    .catch(err => {
+                        console.error('Error al copiar:', err);
+                        alert('No se pudo copiar el código. Por favor, cópialo manualmente.');
                     });
             }
         }
 
-        // Inicializar el temporizador
-        setInterval(actualizarTimer, 1000);
+        // Obtener el código inicial
+        obtenerCodigo();
     </script>
 </body>
 </html>
