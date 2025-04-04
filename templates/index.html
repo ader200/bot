@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Rifas Gratis - Página {{ numero_pagina }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .container {
+            padding-top: 2rem;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: none;
+            border-radius: 15px;
+            margin-bottom: 2rem;
+            transition: transform 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .codigo {
+            font-size: 2.5rem;
+            font-weight: bold;
+            letter-spacing: 5px;
+            color: #fff;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            background: rgba(0,0,0,0.2);
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            font-family: 'Courier New', monospace;
+        }
+        .timer {
+            font-size: 1.2rem;
+            color: #ffd700;
+            margin: 1rem 0;
+            font-weight: bold;
+        }
+        .btn-copy {
+            background: #4CAF50;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+        .btn-copy:hover {
+            background: #45a049;
+            transform: scale(1.05);
+        }
+        .btn-copy:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .estado {
+            font-size: 1.1rem;
+            margin: 1rem 0;
+            padding: 0.5rem;
+            border-radius: 5px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .estado.esperando {
+            color: #ffd700;
+        }
+        .estado.disponible {
+            color: #4CAF50;
+        }
+        .estado.usado {
+            color: #ff4444;
+        }
+        .numero-pagina {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.8rem;
+            color: #ffd700;
+        }
+    </style>
+</head>
+<body>
+    <div class="numero-pagina">Página {{ numero_pagina }}</div>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h1 class="mb-4">🎉 Sistema de Rifas Gratis 🎉</h1>
+                        <div class="codigo" id="codigo">Verificando disponibilidad...</div>
+                        <div class="timer" id="timer"></div>
+                        <div class="estado" id="estado">Verificando código disponible...</div>
+                        <button class="btn btn-copy" onclick="copiarCodigo()" id="btnCopiar" disabled>Copiar Código</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-body">
+                        <h3 class="text-center mb-4">📱 Cómo participar:</h3>
+                        <ol class="text-start">
+                            <li>Espera 1 minuto para que el código esté disponible</li>
+                            <li>Copia el código que aparece en la pantalla</li>
+                            <li>Envía el código al bot de Telegram usando el comando /gratis</li>
+                            <li>¡Sigue las instrucciones del bot para recibir tu rifa gratis!</li>
+                        </ol>
+                        <div class="alert alert-info mt-3">
+                            <strong>⚠️ Importante:</strong>
+                            <ul class="mb-0">
+                                <li>Debes esperar 1 minuto antes de poder ver y usar el código</li>
+                                <li>Solo puedes participar una vez al día</li>
+                                <li>Envía el código al bot de Telegram usando el comando /gratis</li>
+                                <li>¡Sigue las instrucciones del bot para recibir tu rifa gratis!</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let tiempoRestante = 60; // 1 minuto en segundos
+        let codigoActual = '';
+        let codigoMostrado = false;
+        let ultimaActualizacion = Date.now();
+        let timerInterval = null;
+        const numeroPagina = "{{ numero_pagina }}";
+
+        function obtenerCodigo() {
+            fetch(`/codigo_activo/${numeroPagina}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.codigo) {
+                        codigoActual = data.codigo;
+                        if (!codigoMostrado) {
+                            // Si es la primera vez que obtenemos un código, iniciamos el contador
+                            if (!timerInterval) {
+                                timerInterval = setInterval(actualizarTimer, 1000);
+                            }
+                            document.getElementById('estado').textContent = 'Esperando 1 minuto para mostrar el código...';
+                            document.getElementById('estado').className = 'estado esperando';
+                            document.getElementById('timer').textContent = 'Tiempo restante: 1:00';
+                        } else if (tiempoRestante <= 0) {
+                            mostrarCodigo();
+                        }
+                    } else {
+                        // Si no hay código disponible
+                        document.getElementById('codigo').textContent = 'NO HAY CÓDIGOS DISPONIBLES';
+                        document.getElementById('estado').textContent = 'No hay códigos disponibles en este momento';
+                        document.getElementById('estado').className = 'estado usado';
+                        document.getElementById('btnCopiar').disabled = true;
+                        document.getElementById('timer').textContent = '';
+                        if (timerInterval) {
+                            clearInterval(timerInterval);
+                            timerInterval = null;
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('codigo').textContent = 'ERROR AL OBTENER CÓDIGO';
+                    document.getElementById('estado').textContent = 'Error al obtener el código';
+                    document.getElementById('estado').className = 'estado usado';
+                    document.getElementById('btnCopiar').disabled = true;
+                    document.getElementById('timer').textContent = '';
+                    if (timerInterval) {
+                        clearInterval(timerInterval);
+                        timerInterval = null;
+                    }
+                });
+        }
+
+        function mostrarCodigo() {
+            const estado = document.getElementById('estado');
+            const btnCopiar = document.getElementById('btnCopiar');
+            const codigoElement = document.getElementById('codigo');
+            
+            if (codigoActual) {
+                estado.textContent = 'Código disponible';
+                estado.className = 'estado disponible';
+                btnCopiar.disabled = false;
+                codigoElement.textContent = codigoActual;
+                codigoMostrado = true;
+            }
+        }
+
+        function actualizarEstado() {
+            const estado = document.getElementById('estado');
+            const btnCopiar = document.getElementById('btnCopiar');
+            const codigoElement = document.getElementById('codigo');
+            
+            if (tiempoRestante > 0 && codigoActual) {
+                estado.textContent = `Esperando ${Math.floor(tiempoRestante / 60)}:${(tiempoRestante % 60).toString().padStart(2, '0')} para mostrar el código...`;
+                estado.className = 'estado esperando';
+                btnCopiar.disabled = true;
+                codigoElement.textContent = 'CÓDIGO NO DISPONIBLE';
+            } else if (!codigoMostrado && codigoActual) {
+                mostrarCodigo();
+            }
+        }
+
+        function actualizarTimer() {
+            if (tiempoRestante > 0) {
+                const minutos = Math.floor(tiempoRestante / 60);
+                const segundos = tiempoRestante % 60;
+                document.getElementById('timer').textContent = 
+                    `Tiempo restante: ${minutos.toString().padStart(2, '0')}:${segundos.toString().padStart(2, '0')}`;
+                tiempoRestante--;
+                actualizarEstado();
+            } else if (!codigoMostrado && codigoActual) {
+                mostrarCodigo();
+                document.getElementById('timer').textContent = 'Código listo para usar';
+            }
+
+            // Actualizar código cada minuto
+            if (Date.now() - ultimaActualizacion >= 60000) {
+                obtenerCodigo();
+                ultimaActualizacion = Date.now();
+            }
+        }
+
+        function copiarCodigo() {
+            if (codigoMostrado && codigoActual) {
+                navigator.clipboard.writeText(codigoActual)
+                    .then(() => {
+                        const btn = document.getElementById('btnCopiar');
+                        const originalText = btn.textContent;
+                        btn.textContent = '¡Copiado!';
+                        setTimeout(() => {
+                            btn.textContent = originalText;
+                        }, 2000);
+                    })
+                    .catch(err => {
+                        console.error('Error al copiar:', err);
+                        alert('No se pudo copiar el código. Por favor, cópialo manualmente.');
+                    });
+            }
+        }
+
+        // Obtener el código inicial
+        obtenerCodigo();
+    </script>
+</body>
+</html>
