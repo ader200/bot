@@ -109,6 +109,10 @@ def inicializar_mongodb():
         historial_rifa_collection.insert_one({'historial': {}})
     if historial_gratis_collection.count_documents({}) == 0:
         historial_gratis_collection.insert_one({'historial': {}})
+    
+    # Inicializar comprobantes pendientes
+    if comprobantes_pendientes_collection.count_documents({}) == 0:
+        comprobantes_pendientes_collection.insert_one({'comprobantes': []})
 
 def cargar_datos(coleccion, campo=None):
     """Carga datos de una colección de MongoDB"""
@@ -706,8 +710,8 @@ def procesar_comprobante_rifa(message, nombre, celular):
             types.InlineKeyboardButton("❌ No", callback_data=f"verificar_no_{message.chat.id}_{comprobante_id}")
         )
         
-        # Guardar datos en la base de datos
-        datos_temp = {
+        # Datos del nuevo comprobante
+        nuevo_comprobante = {
             'nombre': nombre,
             'celular': celular,
             'chat_id': message.chat.id,
@@ -717,8 +721,12 @@ def procesar_comprobante_rifa(message, nombre, celular):
             'fecha_creacion': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
-        # Guardar en MongoDB
-        comprobantes_pendientes_collection.insert_one(datos_temp)
+        # Obtener lista de comprobantes actual
+        comprobantes = cargar_datos(comprobantes_pendientes_collection, 'comprobantes')
+        
+        # Añadir nuevo comprobante y guardar
+        comprobantes.append(nuevo_comprobante)
+        guardar_datos(comprobantes_pendientes_collection, comprobantes, 'comprobantes')
         
         # Enviar foto con botones al admin
         bot.send_photo(
@@ -743,25 +751,26 @@ def manejar_verificacion(call):
         _, decision, chat_id, comprobante_id = call.data.split('_')
         chat_id = int(chat_id)
         
-        # Buscar el comprobante en la base de datos
-        comprobante = comprobantes_pendientes_collection.find_one({'comprobante_id': comprobante_id})
+        # Obtener comprobantes pendientes
+        comprobantes = cargar_datos(comprobantes_pendientes_collection, 'comprobantes')
         
-        if comprobante:
+        # Buscar el comprobante específico
+        indice_comprobante = next((i for i, c in enumerate(comprobantes) if c['comprobante_id'] == comprobante_id), None)
+        
+        if indice_comprobante is not None:
+            comprobante = comprobantes[indice_comprobante]
+            
             if decision == 'si':
                 # Actualizar estado del comprobante
-                comprobantes_pendientes_collection.update_one(
-                    {'comprobante_id': comprobante_id},
-                    {'$set': {'estado': 'verificado'}}
-                )
+                comprobantes[indice_comprobante]['estado'] = 'verificado'
+                guardar_datos(comprobantes_pendientes_collection, comprobantes, 'comprobantes')
                 
                 bot.send_message(ADMIN_CHAT_ID, "¿Cuántos boletos está comprando?")
                 bot.register_next_step_handler(call.message, procesar_cantidad_boletos, comprobante)
             else:
                 # Actualizar estado del comprobante
-                comprobantes_pendientes_collection.update_one(
-                    {'comprobante_id': comprobante_id},
-                    {'$set': {'estado': 'rechazado'}}
-                )
+                comprobantes[indice_comprobante]['estado'] = 'rechazado'
+                guardar_datos(comprobantes_pendientes_collection, comprobantes, 'comprobantes')
                 
                 bot.send_message(comprobante['chat_id'], 
                     "Lo sentimos, su comprobante no fue verificado como auténtico. "
@@ -775,7 +784,7 @@ def manejar_verificacion(call):
             )
             
             # Mostrar mensaje de cuántos comprobantes quedan pendientes
-            pendientes = comprobantes_pendientes_collection.count_documents({'estado': 'pendiente'})
+            pendientes = sum(1 for c in comprobantes if c['estado'] == 'pendiente')
             if pendientes > 0:
                 bot.send_message(ADMIN_CHAT_ID, f"Quedan {pendientes} comprobantes pendientes de verificar.")
     else:
@@ -818,11 +827,13 @@ def procesar_cantidad_boletos(message, datos_temp):
             })
             guardar_datos(compras_collection, compras, 'compras')
             
-            # Actualizar estado del comprobante a completado
-            comprobantes_pendientes_collection.update_one(
-                {'comprobante_id': datos_temp['comprobante_id']},
-                {'$set': {'estado': 'completado'}}
-            )
+            # Actualizar estado del comprobante a completado en la lista
+            comprobantes = cargar_datos(comprobantes_pendientes_collection, 'comprobantes')
+            indice_comprobante = next((i for i, c in enumerate(comprobantes) if c['comprobante_id'] == datos_temp['comprobante_id']), None)
+            
+            if indice_comprobante is not None:
+                comprobantes[indice_comprobante]['estado'] = 'completado'
+                guardar_datos(comprobantes_pendientes_collection, comprobantes, 'comprobantes')
             
             # Generar y enviar QR
             qr_data = f"Números Únicos:\n{', '.join(numeros_unicos)}\nNombre: {datos_temp['nombre']}\nCelular: {datos_temp['celular']}"
