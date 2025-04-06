@@ -51,12 +51,11 @@ def iniciar_rifa():
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
                 
-        # Intentar iniciar el proceso con reintentos
-        max_retries = int(os.getenv('MAX_RETRIES', 3))
+        # Intentar iniciar el proceso sin límite de reintentos
         retry_delay = int(os.getenv('RETRY_DELAY', 5))
-        for attempt in range(max_retries):
+        while True:
             try:
-                logger.info(f"Intento {attempt + 1} de {max_retries} para iniciar rifa.py")
+                logger.info("Intentando iniciar rifa.py...")
                 
                 # Verificar que el archivo existe
                 if not os.path.exists('rifa.py'):
@@ -86,14 +85,9 @@ def iniciar_rifa():
                 return
                 
             except Exception as e:
-                logger.error(f"Error en intento {attempt + 1}: {str(e)}")
-                if attempt < max_retries - 1:
-                    logger.info(f"Reintentando en {retry_delay} segundos...")
-                    time.sleep(retry_delay)
-                else:
-                    logger.error("Se alcanzó el número máximo de reintentos")
-                    rifa_process = None
-                    raise
+                logger.error(f"Error al intentar iniciar rifa.py: {str(e)}")
+                logger.info(f"Reintentando en {retry_delay} segundos...")
+                time.sleep(retry_delay)
                     
     except Exception as e:
         logger.error(f"Error fatal al iniciar rifa.py: {str(e)}")
